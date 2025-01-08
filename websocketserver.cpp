@@ -1,4 +1,13 @@
 #include "websocketserver.h"
+#include <QWebSocket>
+#include <QWebSocketServer>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QDebug>
+#include <QFile>
+#include <QTextStream>
+
 
 WebSocketServer::WebSocketServer(QObject *parent)
     : QObject{parent}
@@ -11,20 +20,65 @@ WebSocketServer::WebSocketServer(QObject *parent)
     } else {
         qDebug() << "[ERROR] WebSocket server failed to start";
     }
+
+    // Start monitoring client list
+    monitorTimer = new QTimer(this);
+    connect(monitorTimer, &QTimer::timeout, this, &WebSocketServer::monitorClientList);
+    monitorTimer->start(2000); // Check every 2 seconds
 }
 
-WebSocketServer::~WebSocketServer()
-{
-    for (QWebSocket *client : clients_server) {
-        client->close();
-        client->deleteLater();
+void WebSocketServer::broadcastClientList() {
+    QStringList clients = parseClientsFromPJSIP();
+    QJsonArray clientArray;
+    for (const QString &client : clients) {
+        clientArray.append(client);
     }
-    server->close();
-    server->deleteLater();
+    QJsonDocument doc(clientArray);
+    QString message = doc.toJson();
+
+    for (QWebSocket *client : clients_server) {
+        if (client->state() == QAbstractSocket::ConnectedState) {
+            client->sendTextMessage(message);
+        } else {
+            clients_server.removeAll(client);
+            client->deleteLater();
+        }
+    }
 }
 
-void WebSocketServer::onNewConnection()
-{
+void WebSocketServer::monitorClientList() {
+    QStringList currentClients = parseClientsFromPJSIP();
+    if (currentClients != lastClientList) {
+        lastClientList = currentClients;
+        broadcastClientList();
+    }
+}
+
+QStringList WebSocketServer::parseClientsFromPJSIP() {
+    QStringList clients;
+    QFile file("/etc/asterisk/pjsip.conf");
+
+    if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QTextStream in(&file);
+        QString currentSection;
+
+        while (!in.atEnd()) {
+            QString line = in.readLine().trimmed();
+
+            if (line.startsWith("[") && line.endsWith("]")) {
+                currentSection = line.mid(1, line.length() - 2);
+                if (!currentSection.startsWith("transport") &&
+                    !currentSection.startsWith("global")) {
+                    clients.append(currentSection);
+                }
+            }
+        }
+        file.close();
+    }
+    return clients;
+}
+
+void WebSocketServer::onNewConnection() {
     QWebSocket *client = server->nextPendingConnection();
     clients_server.append(client);
 
@@ -34,41 +88,36 @@ void WebSocketServer::onNewConnection()
     qDebug() << "[SYSTEM] New operator connected - ID:" << client->peerAddress().toString();
 }
 
-void WebSocketServer::onUpdate(const QString &message)
-{
+void WebSocketServer::onUpdate(const QString &message) {
     QWebSocket *client = qobject_cast<QWebSocket *>(sender());
     if (client) {
         qDebug() << "[COMMS] Message received from operator:" << message;
 
-        QJsonObject statusUpdate;
-        statusUpdate["action"] = "status_update";
-        statusUpdate["operator_count"] = clients_server.count();
-
-        QJsonArray operatorArray;
-        for (int i = 0; i < clients_server.count(); ++i) {
-            QJsonObject operatorInfo;
-            operatorInfo["id"] = i + 1;
-            operatorInfo["status"] = "ACTIVE";
-            operatorInfo["callsign"] = QString("OPERATOR_%1").arg(i + 1);
-            operatorArray.append(operatorInfo);
-        }
-        statusUpdate["operators"] = operatorArray;
-
-        QJsonDocument doc(statusUpdate);
-        QString updateMessage = doc.toJson(QJsonDocument::Compact);
-
-        for (QWebSocket *socket : std::as_const(clients_server)) {
-            socket->sendTextMessage(updateMessage);
+        // Broadcast the message to all clients
+        for (QWebSocket *socket : clients_server) {
+            if (socket != client) {
+                socket->sendTextMessage(message);
+            }
         }
     }
 }
 
-void WebSocketServer::onClientDisconnected()
-{
+void WebSocketServer::onClientDisconnected() {
     QWebSocket *client = qobject_cast<QWebSocket *>(sender());
     if (client) {
         qDebug() << "[SYSTEM] Operator disconnected - ID:" << client->peerAddress().toString();
         clients_server.removeAll(client);
         client->deleteLater();
     }
+}
+
+
+
+WebSocketServer::~WebSocketServer() {
+    for (QWebSocket *client : clients_server) {
+        client->close();
+        client->deleteLater();
+    }
+    server->close();
+    server->deleteLater();
 }

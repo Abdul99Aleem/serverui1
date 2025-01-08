@@ -2,6 +2,9 @@
 #include "ui_mainwindow.h"
 #include <QNetworkInterface>
 #include <QHostAddress>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -100,7 +103,14 @@ void MainWindow::monitorPJSIPConfig() {
     pjsipMonitorTimer = new QTimer(this);
     connect(pjsipMonitorTimer, &QTimer::timeout, this, [this]() {
         QStringList currentClients = parseClientsFromPJSIP();
-        populateClientList(currentClients);
+
+        // Convert QStringList to QList<ClientData>
+        QList<ClientData> clients;
+        for (const QString &client : currentClients) {
+            clients.append(ClientData{client, "", "", "OFFLINE"});
+        }
+
+        populateClientList(clients);
         broadcastClientList();
     });
     pjsipMonitorTimer->start(2000); // Check every 2 seconds
@@ -132,7 +142,6 @@ QStringList MainWindow::parseClientsFromPJSIP() {
 
 void MainWindow::broadcastClientList() {
     QStringList clients = parseClientsFromPJSIP();
-    // Convert client list to JSON
     QJsonArray clientArray;
     for (const QString &client : clients) {
         clientArray.append(client);
@@ -140,9 +149,10 @@ void MainWindow::broadcastClientList() {
     QJsonDocument doc(clientArray);
     QString message = doc.toJson();
 
-    // Broadcast to all connected clients
     for (QTcpSocket* client : clientSockets) {
-        client->write(message.toUtf8());
+        if (client->state() == QAbstractSocket::ConnectedState) {
+            client->write(message.toUtf8());
+        }
     }
 }
 

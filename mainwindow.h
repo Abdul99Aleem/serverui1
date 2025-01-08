@@ -69,6 +69,7 @@ private:
     void connectToSTM32();
     void handleSTM32Data();
 
+    QList<QTcpSocket*> clientSockets;
     void monitorPJSIPConfig();
     void broadcastClientList();
     QStringList parseClientsFromPJSIP();

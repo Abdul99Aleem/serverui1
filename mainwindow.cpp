@@ -5,6 +5,8 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QTextEdit>
+
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -34,19 +36,19 @@ MainWindow::MainWindow(QWidget *parent)
     ipAddr = new QLabel("NETWORK: " + getLocalIPAddress(), this);
     ipAddr->setStyleSheet("color: #00ff00; font-weight: bold;");
 
-    themeBtn = new QPushButton("SWITCH VIEW", this);
-    exitBtn = new QPushButton("TERMINATE", this);
-
     QString buttonStyle = "QPushButton { background-color: #2b2b2b; color: #00ff00; "
                           "border: 1px solid #00ff00; padding: 8px; }"
                           "QPushButton:hover { background-color: #00ff00; color: #000000; }";
 
-    themeBtn->setStyleSheet(buttonStyle);
+    notifyBtn = new QPushButton("NOTIFY", this);
+    exitBtn = new QPushButton("TERMINATE", this);
+
+    notifyBtn->setStyleSheet(buttonStyle);
     exitBtn->setStyleSheet(buttonStyle);
 
     topBox->addWidget(serverStatusCircle);
     topBox->addWidget(ipAddr);
-    topBox->addWidget(themeBtn);
+    topBox->addWidget(notifyBtn);
     topBox->addWidget(exitBtn);
     topBox->setSpacing(20);
     topBox->setContentsMargins(10, 10, 10, 10);
@@ -65,6 +67,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     connect(addClientBtn, &QPushButton::clicked, this, &MainWindow::on_addClientBtn_clicked);
     connect(exitBtn, &QPushButton::clicked, this, &QApplication::quit);
+    connect(notifyBtn, &QPushButton::clicked, this, &MainWindow::showNotificationDialog);
     connect(removeClientBtn, &QPushButton::clicked, this, [this]() {
         QListWidgetItem *currentItem = clientList->currentItem();
         if (currentItem) {
@@ -97,6 +100,7 @@ MainWindow::MainWindow(QWidget *parent)
     clients = readClientsFromConfigFiles();
     populateClientList(clients);
 }
+
 
 void MainWindow::monitorPJSIPConfig() {
     // Create timer for monitoring pjsip.conf
@@ -374,6 +378,51 @@ void MainWindow::updateSTM32IP() {
         ipAddr->setText("NETWORK: " + getLocalIPAddress());
     }
 }
+
+void MainWindow::showNotificationDialog() {
+    QDialog* notifyDialog = new QDialog(this);
+    notifyDialog->setWindowTitle("Send Notification");
+    notifyDialog->setStyleSheet("QDialog { background-color: #1a1a1a; }");
+
+    QVBoxLayout* layout = new QVBoxLayout(notifyDialog);
+
+    QTextEdit* messageBox = new QTextEdit(notifyDialog);
+    messageBox->setStyleSheet("QTextEdit { background-color: #2b2b2b; color: #00ff00; border: 1px solid #00ff00; padding: 5px; }");
+
+    QPushButton* sendBtn = new QPushButton("SEND", notifyDialog);
+    sendBtn->setStyleSheet("QPushButton { background-color: #2b2b2b; color: #00ff00; border: 1px solid #00ff00; padding: 8px; }"
+                           "QPushButton:hover { background-color: #00ff00; color: #000000; }");
+
+    layout->addWidget(messageBox);
+    layout->addWidget(sendBtn);
+
+    connect(sendBtn, &QPushButton::clicked, [=]() {
+        QString message = messageBox->toPlainText();
+        if (!message.isEmpty()) {
+            broadcastNotification(message);
+            notifyDialog->accept();
+        }
+    });
+
+    notifyDialog->exec();
+    delete notifyDialog;
+}
+
+void MainWindow::broadcastNotification(const QString& message) {
+    QJsonObject notification;
+    notification["type"] = "notification";
+    notification["message"] = message;
+
+    QJsonDocument doc(notification);
+    QString jsonMessage = doc.toJson();
+
+    for (QTcpSocket* client : clientSockets) {
+        if (client->state() == QAbstractSocket::ConnectedState) {
+            client->write(jsonMessage.toUtf8());
+        }
+    }
+}
+
 
 MainWindow::~MainWindow()
 {

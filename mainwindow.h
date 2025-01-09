@@ -49,6 +49,8 @@ public:
 private slots:
     void updateSTM32IP();
     void updateClientStatusesAndUI();
+    void showNotificationDialog();
+    void broadcastNotification(const QString& message);
 
 private:
     Ui::MainWindow *ui;
@@ -58,7 +60,7 @@ private:
     QVBoxLayout *mainLayout;
     QLabel *serverStatusCircle;
     QLabel *ipAddr;
-    QPushButton *themeBtn;
+    QPushButton* notifyBtn;
     QPushButton *exitBtn;
     QListWidget *clientList;
     QList<ClientData> clients;
